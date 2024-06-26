@@ -1,0 +1,1256 @@
+#! /bin/sh
+# This is a shell archive, meaning:
+# 1. Remove everything above the #! /bin/sh line.
+# 2. Save the resulting text in a file.
+# 3. Execute the file with /bin/sh to create the files:
+# pstext.c
+# pstext.pst
+# pstext.ps
+# This archive created: Thu Oct 29 14:33:23 1992 by geof
+#
+#
+export PATH; PATH=/bin:$PATH
+
+
+if test -f pstext.c ; then
+echo shar: will not over-write existing file pstext.c
+else
+echo shar: extracting pstext.c, 11419 characters
+sed 's/^X//' > pstext.c <<'SHAR_EOF'
+X/*
+X * PostScript text formatter
+X *
+X * Copyright (C) 1989 Geoffrey H. Cooper, All Rights Reserved.
+X * Permission is granted to copy and use this program so long as [1] this
+X * copyright notice is preserved, and [2] no financial gain is involved
+X * in copying the program. This program may not be sold as "shareware"
+X * or "public domain" software without the express, written permission
+X * of the author.
+X *
+X * $Log: pstext.c,v $
+X * Revision 1.1 90/01/18 18:21:26 geof
+X * Initial revision
+X *
+X */
+X
+X#include <stdio.h>
+X#include <ctype.h>
+X
+X#ifdef UNIX
+Xchar mfile[] = "/usr/local/lib/pstext.ps";
+X#else /* MSDOS */
+Xchar mfile[] = "\\bin\\pstext.ps";
+X#endif
+Xchar *ctime();
+X
+X/*
+X * Global flags
+X */
+Xchar showH;
+Xchar doligatures;
+X
+Xchar buf[1024];
+Xchar qbuf[1024];
+Xchar *strstr();
+Xvoid ReplaceAll();
+X
+Xstruct {
+X char *lig, *rep;
+X} ligatures[] =
+X{
+X { "fi", "\\256" }
+X ,{ "fl", "\\257" }
+X ,{ "--", "\\320" }
+X ,{ "``", "\\252" }
+X ,{ "''", "\\272" }
+X ,{ ",,", "\\271" }
+X ,{ "...", "\\274" }
+X ,{ "<<", "\\253" }
+X ,{ ">>", "\\273" }
+X ,{ "\\/", "" }
+X};
+X#define NumLigatures ((sizeof ligatures)/sizeof(ligatures[0]))
+X
+Xmain(argc, argv)
+X char **argv;
+X{
+X FILE *f, *outf;
+X char *ts;
+X int c, n;
+X long clock;
+X char timestamp, header;
+X
+X doligatures = 1;
+X showH = 0;
+X header = 1;
+X timestamp = 0;
+X outf = stdout;
+X while ( argc > 1 && argv[1][0] == '-' ) {
+X if ( strcmp(argv[1], "-n") == 0 ) header = 0;
+X else if ( strcmp(argv[1], "-t") == 0 ) timestamp = 1;
+X else if ( strcmp(argv[1], "-h") == 0 ) showH = 1;
+X else if ( strcmp(argv[1], "-l") == 0 ) doligatures = 0;
+X else
+X fprintf(stderr, "bad flag %s, ignored\n", argv[1]);
+X argv++; argc--;
+X }
+X
+X if ( header ) {
+X f = fopen(mfile, "r");
+X if ( f == NULL ) {
+X fprintf(stderr, "Warning: can't open header file \"%s\"\n", mfile);
+X perror("on open");
+X exit(1);
+X }
+X fprintf(outf, "%%!\n");
+X while ( (c = getc(f)) != EOF ) {
+X putc(c, outf);
+X }
+X fclose(f);
+X fprintf(outf, "\n");
+X } else {
+X if ( argc > 1 ) argv++;
+X }
+X time(&clock);
+X ts = ctime(&clock);
+X for ( c = 0; ts[c] && ts[c] != '\n'; c++ )
+X ;
+X ts[c] = 0;
+X if ( timestamp ) {
+X fprintf(outf, "/TimeStamp (%s) def\n", ts);
+X }
+X n = 0;
+X while ( *++argv ) {
+X n++;
+X f = fopen(*argv, "r");
+X if ( f == NULL ) {
+X perror(*argv);
+X } else {
+X text(f, stdout);
+X fclose(f);
+X }
+X }
+X if ( n == 0 ) {
+X text(stdin, stdout);
+X }
+X exit(0);
+X}
+X
+Xtext(f, outf)
+X FILE *f, *outf;
+X{
+X char *b, *limit, *q;
+X int c;
+X char eof, breakpara, someoutput;
+X int numSpaces, numNewLines;
+X int i;
+X
+X b = buf;
+X limit = &buf[(sizeof buf) - 3];
+X eof = 0;
+X breakpara = 0;
+X numSpaces = 0;
+X numNewLines = 0;
+X qbuf[0] = 0;
+X if ( showH )
+X fprintf(outf, "H %% initial header\n");
+X c = getc(f);
+X if ( c == EOF ) {
+X fprintf(stderr, "Warning: null input\n");
+X return;
+X }
+X if ( c == '.' || c == '\'' )
+X goto docmd;
+X ungetc(c, f);
+X do {
+X while ( b < limit && (c = getc(f)) != EOF && c != ' ' && c != '\n' ) {
+X if ( c == '\\' ) {
+X c = getc(f);
+X switch ( c ) {
+X
+X case '\\':
+X case '0': case '1': case '2': case '3':
+X case '4': case '5': case '6': case '7':
+X case '/':
+X *b++ = '\\';
+X case '.':
+X case '\'':
+X break;
+X
+X /* switch fonts */
+X case 'f':
+X *b = 0;
+X c = getc(f);
+X c = toupper(c);
+X if ( c == 'R' || c == 'I' || c == 'P' || c == 'B' || c == 'L' || c == 'F' || c == 'S' ) {
+X sprintf(qbuf, "/%c f\n", c);
+X c = 0;
+X goto break2;
+X }
+X fprintf(stderr, "Warning: \\f%c illegal, ignored.\n", c);
+X continue;
+X
+X case '(':
+X q = qbuf;
+X while ( (c = getc(f)) != EOF && c != '\n' && c != ')' ) {
+X *q++ = c;
+X }
+X sprintf(q, "%%()\n");
+X if ( c != ')' )
+X fprintf(stderr, "Warning: unterminated \\(...) construct, terminated at code 0x%02x\n", c);
+X c = 0;
+X goto break2;
+X
+X default:
+X fprintf(stderr, "Warning, \\%c illegal, treating it as text\n", c);
+X *b++ = '\\';
+X *b++ = '\\';
+X }
+X } else {
+X if ( c == '(' || c == ')' )
+X *b++ = '\\';
+X }
+X *b++ = c;
+X }
+X break2:
+X someoutput = 0;
+X *b = 0;
+X if ( b > buf ) {
+X someoutput = 1;
+X if ( doligatures ) {
+X for ( i = 0; i < NumLigatures; i++ )
+X ReplaceAll(ligatures[i].lig, ligatures[i].rep, buf);
+X }
+X fprintf(outf, "(%s)W ", buf);
+X }
+X numSpaces = 1;
+X if ( c == '\n' ) {
+X c = getc(f);
+X if ( c == '\n' ) {
+X numNewLines = 1;
+X breakpara = 1;
+X while ( (c = getc(f)) != EOF && c == '\n' ) {
+X numNewLines++;
+X }
+X if ( c == EOF ) eof = 1;
+X if ( c != '.' && c != '\'' ) {
+X ungetc(c, f);
+X c = '\n';
+X }
+X } else if ( c == '.' ) {
+X numNewLines = 0;
+X breakpara = 1;
+X } else if ( c == EOF ) eof = 1;
+X else
+X ungetc(c, f);
+X } else if ( c == ' ' ) {
+X while ( (c = getc(f)) != EOF && c == ' ' ) {
+X numSpaces++;
+X }
+X if ( c == EOF ) eof = 1;
+X else ungetc(c, f);
+X c = ' ';
+X } else if ( c == EOF ) {
+X numSpaces = 0;
+X breakpara = 1;
+X eof = 1;
+X } else
+X numSpaces = 0;
+X if ( numSpaces > 0 ) {
+X someoutput = 1;
+X if ( numSpaces == 1 )
+X fprintf(outf, "S ");
+X else
+X fprintf(outf, "%d Ss", numSpaces);
+X }
+X if ( breakpara ) {
+X someoutput = 1;
+X fprintf(outf, "BK ");
+X }
+X while ( numNewLines-- > 0 ) {
+X someoutput = 1;
+X fprintf(outf, "NL ");
+X }
+X if ( someoutput )
+X putc('\n', outf);
+X numSpaces = 0;
+X numNewLines = 0;
+X breakpara = 0;
+X if ( c == '.' || c == '\'' ) {
+X docmd: for (;;) {
+X b = buf;
+X while ( (c = getc(f)) != EOF && c != '\n' )
+X *b++ = c;
+X *b = 0;
+X if ( c == EOF ) goto doeof;
+X if ( buf[0] == '+' ) {
+X fprintf(outf, "%s %%.+\n", &buf[1]);
+X if ( ! verbatim(f, outf) ) goto doeof;
+X } else {
+X for ( b = buf; *b; b++ ) {
+X putc(*b, outf);
+X }
+X fprintf(outf, " %%.\n");
+X }
+X c = getc(f);
+X if ( c == EOF ) goto doeof;
+X if ( c != '.' && c != '\'' ) {
+X ungetc(c, f);
+X break;
+X }
+X }
+X }
+X b = buf;
+X for ( q = qbuf; *q; q++ )
+X putc(*q, outf);
+X qbuf[0] = 0;
+X } while ( ! eof );
+X doeof:
+X fprintf(outf, "BK showpage\n");
+X}
+X
+Xverbatim(f, outf)
+X FILE *f, *outf;
+X{
+X char nl, passthru;
+X int c;
+X
+X nl = 1;
+X passthru = 0;
+X while ( (c = getc(f)) && c != EOF ) {
+X switch ( c ) {
+X case '\n':
+X if ( !passthru ) {
+X if ( ! nl ) fprintf(outf, ")show ");
+X fprintf(outf, "NL");
+X }
+X putc('\n', outf);
+X nl = 1;
+X passthru = 0;
+X break;
+X
+X
+X case '\'':
+X case '.':
+X if ( nl ) {
+X passthru = 1;
+X nl = 0;
+X c = getc(f);
+X if ( c == EOF ) break;
+X if ( c == '-' ) {
+X while ( (c = getc(f)) != EOF && c != '\n' )
+X putc(c, outf);
+X fprintf(outf, " %%.-\n");
+X return ( c != EOF );
+X }
+X ungetc(c, f);
+X break;
+X }
+X /* fall thru */
+X default:
+X if ( !passthru ) {
+X if ( nl )
+X putc('(', outf);
+X if ( c == '(' || c == ')' )
+X putc('\\', outf);
+X if ( c == '\\' ) {
+X c = getc(f);
+X switch ( c ) {
+X
+X case '\\':
+X putc('\\', outf);
+X break;
+X
+X /* switch fonts */
+X case 'f':
+X c = getc(f);
+X c = toupper(c);
+X if ( c == 'R' || c == 'I' || c == 'P' || c == 'B' || c == 'L' )
+X fprintf(outf, ")show /%c f (", c);
+X else
+X fprintf(stderr, "Warning: \\f%c illegal, ignored.\n", c);
+X nl = 0;
+X continue;
+X
+X case '(':
+X fprintf(outf, ")show ");
+X while ( (c = getc(f)) != EOF && c != '\n' && c != ')' ) {
+X putc(c, outf);
+X }
+X fprintf(outf, "%%()\n(");
+X if ( c != ')' )
+X fprintf(stderr, "Warning: unterminated \\(...) construct, terminated at code 0x%02x\n", c);
+X break;
+X
+X default:
+X fprintf(stderr, "Warning, \\%c illegal, treating it as text\n", c);
+X putc('\\', f);
+X }
+X }
+X }
+X nl = 0;
+X putc(c, outf);
+X }
+X }
+X return ( c != EOF );
+X}
+X
+Xvoid
+XReplaceAll(s, withs, ins)
+X char *s, *withs, *ins;
+X{
+X int diff;
+X char *b;
+X
+X diff = strlen(withs) - strlen(s);
+X while ( *ins ) {
+X ins = strstr(s, ins);
+X if ( ins == NULL )
+X return;
+X
+X if ( diff > 0 ) {
+X for ( b = ins; *b; b++ )
+X ;
+X while ( b > ins ) {
+X b[diff] = *b;
+X b--;
+X }
+X } else if ( diff < 0 ) {
+X b = ins + (-diff);
+X while ( b[diff] = *b )
+X b++;
+X }
+X b = withs;
+X while ( *b )
+X *ins++ = *b++;
+X }
+X}
+X
+Xchar *
+Xstrstr(s, ins)
+X char *s, *ins;
+X{
+X char *ms, *mins;
+X
+X while ( *ins ) {
+X if ( *s == *ins ) {
+X ms = s+1;
+X mins = ins+1;
+X while ( *ms && *ms == *mins ) {
+X ms++; mins++;
+X }
+X if ( *ms == 0 )
+X return ( ins );
+X }
+X ins++;
+X }
+X return ( NULL );
+X}
+SHAR_EOF
+len=`wc -c < pstext.c`
+if test $len != 11419 ; then
+echo shar: pstext.c was $len bytes long, should have been 11419
+fi
+fi # end of overwriting check
+
+if test -f pstext.pst ; then
+echo shar: will not over-write existing file pstext.pst
+else
+echo shar: extracting pstext.pst, 7647 characters
+sed 's/^X//' > pstext.pst <<'SHAR_EOF'
+X.% PSTEXT Documentation, in PSTEXT (of course).
+X.% Copyright (C) 1991, Geoffrey H. Cooper.
+X.% Permission is granted to copy and modify this file on a
+X.% non-commercial basis only, providing this copyright notice
+X.% is preserved. All rights reserved.
+X.%
+X.% $Log: pstext.pst,v $
+X.% Revision 1.2 92/10/29 14:31:36 geof
+X.% Added copyright notice.
+X.%
+X.% Revision 1.1 90/01/18 18:21:52 geof
+X.% Initial revision
+X.%
+X.%
+X./Century F 14 FontSize /B f
+X.(Notes on the PostScript Text Formatter)Center
+X.12 FontSize /R f
+X.(by)Center
+X.(Geoffrey Cooper)Center
+X.NL 8 FontSize
+X.([Copyright (C) 1989, Geoffrey H. Cooper, All Rights Reserved.])Center
+X.NL 12 FontSize
+X./q .25 inch def
+X.NL
+XThe ``pstext'' program is a text formatter that translates an input
+Xformat into a PostScript(tm) program. The formatter is not
+Xsignificantly better in its capabilities than other formatters, and it
+Xis only targetted to PostScript. It is interesting in that it is
+Ximplemented as a novel synergism between C and PostScript.
+XThe text formatter is implemented as a C front end that performs
+Xlittle besides parsing functions, and a PostScript macro package that
+Ximplements all text formatting decisions. The C code is about 425
+Xlines of code and the PostScript side is about 525 lines of
+XPostScript; I believe you will be surprised by the amount of
+Xfunctionality that squeezes into that small a space.
+X
+XThe command line syntax is as follows:
+X.q Indent
+Xpstext [-n | -t | -h -l] filename
+X.
+XFlags:
+X.q Indent
+Xn -- don't prefix standard header.
+X.
+Xt -- define /TimeStamp as the current date and time.
+X.
+Xh -- put header on first page automatically (can be done in master)
+X.
+Xl -- turn off ligature processing
+X.Undent Undent NL
+XNormal Processing consists of three modes: text, verbatim, and
+Xpassthru. In text mode, text is divided into words -- strings of
+Xnon-space/newline characters. Each word is converted to a PostScript
+Xsyntax that the standard macro package formats and fills into
+Xparagraphs.
+X
+XWithin the text, octal numbers may be represented as \\777 (three
+Xoctal digits preceded by a backslash. The backslash character must
+Xbe doubled to be put in the text. The sequence \\fC where C is one of
+X"RIBPFSL" causes the current font to change to Roman, Italic, Bold,
+XPbold+italic, Fixed width, Symbol or Last (the last font set is
+Xresumed). This is done by transforming \\fC into "/C f" which has the
+Xappropriate interpretation in the standard macro package.
+X
+XThe text is also parsed for the following ligatures, listed in order
+Xof priority. The last is used to separate a ligature of higher
+Xpriority, like this: f\\/ill this:
+X.q Indent /F f
+X.+
+X fi -> \\256
+X fl -> \\257
+X -- -> \\320
+X `` -> \\252
+X '' -> \\272
+X ,, -> \\271 (lower double close quotes)
+X ... -> \\274
+X << -> \\253
+X >> -> \\273
+X \\/ -> nothing
+X.- /L f Undent NL
+XNote that any of these is also available by simply inserting the
+Xoctal value in line. E.g., "\\256ill" and "fill" result in the same
+XPostScript.
+X
+XA sequence of the form \\(...) causes the contents of the parentheses
+Xto be inserted as passthru PostScript in line in context. It is
+Xentirely equivalent to the line:
+X.q Indent
+X '...
+X.Undent
+X(see below), but may appear "prettier" to some. This construct may
+Xnot be split across two lines, and the contents may not include
+Xparentheses.
+X
+XAny line beginning with a period (.) or apostrophe (') is processed
+Xas a command or a passthru. A period causes a side effect of a
+X"break", where the text being filled is broken. An apostrophe has no
+Xsuch side effect.
+X
+XA command line is processed as a "passthru", meaning that the
+Xcontents of the line are simply emitted to the PostScript output
+Xafter the first character (and an optional '+') is stripped off.
+XIf the second character in the line is the plus sign (+), verbatim
+Xmode is entered. In verbatim mode, each line is packaged with
+Xparentheses with "show NL", so that no special processing takes
+Xplace. To achieve other effects, use passthru lines. \\fC font
+Xswitching is still active in this mode, as are \\(...) passthru's.
+X
+XVerbatim mode is exited as it is entered, except that a minus sign is
+Xused instead of a plus sign. Plus signs may not currently be nested.
+X
+X.(The Macro Package)Sect SectPush
+X
+XThe macro package determines the actual formatting of text. The
+Xfollowing macros are used:
+X
+X.(Variables)Sect
+X.+ /F f
+X<<name>> <<default>> <<meaning>>
+XSize 10 text size
+XLeading 12
+XJustify true adjust right margins
+XSpaceMax 10 max space before letterset
+XTopMargin 10 inch - Leading
+XBottomMargin 1 inch
+XLeftMargin 1 inch
+XLineWidth 6.5 inch
+XPageNum 1 (initial) number that "H" uses
+Xcurfam dict contains values of /C...
+X.- /L f (Macros)Sect /F f
+X.+
+Xinch - { 72 mul }
+X
+Xfontfamily F - Change font families
+X
+X fontfamily = /Times, /Helvetica, /Courier, /Palatino, /Lucida,
+X /LucidaSans, /LucidaSansTypewriter = /LucidaMono, /NewCenturySchlbk
+X = /NewCenturySchoolbook = /Century, /AvantGarde, /LubalinGraph, /Bookman,
+X /Garamond, /Optima, /Symbol
+X
+X For Symbol, R= Symbol, I= ZapfChancery, B= ZapfDingbats, P= Times-Italic.
+X
+X[/P /B /I /R /F /S /L] f - change face
+X
+Xnumber /FontSize - Change size of fonts
+X
+X(string)Center - center string on the current line
+X
+XNL - force newline.
+X
+XHNL - half newline
+X
+Xnumberoflines QNL - quantified newline.
+X
+XNP - new page
+X
+XBK - break
+X
+X(string)W - add a word to the current line.
+X
+Xnumber Tab - execute tab stop based on tabs every
+X "number" points.
+X
+Xnumber TabTo - move to particular horiz. position
+X
+Xnumber Indent - begin indenting by argument (may be nested)
+XUndent - undo last indent
+X
+Xnumber Squeeze - indent both left and right margins
+X ...
+XUnsqueeze
+X
+XBeginEnum - enumerated lists (may be nested)
+XEnum
+X ...
+XEnum
+X ...*
+XEndEnum
+X
+XItem - bulleted paragraph at current indent.
+X Bullet is at last indent, text at
+X this one.
+X
+X(string)Descr - Like item, but use "string" as bullet.
+X
+X(string)Sect - Begin a new section, "string" is heading.
+X
+XSectPush - push section numbering level
+XSectPop - inverse of above.
+X
+XH - standard header procedure (may be redefined).
+X.- /L f NL
+XThe strings /{Header,Footer}{Left,Right,Center} define the header to
+Xbe generated. A tilde is transformed into the current page number.
+XThe strings may be zero length. The default is to center the page
+Xnumber in em-dashes in the header. If HeaderRight is zero length and
+XTimeStamp is defined, the HeaderRight is set to be TimeStamp (see the
+X-t option, above). To just inhibit this behavior , set HeaderRight
+Xto be a space character.
+X
+X.(Other variables)Sect
+X.+ /F f
+X<<var name>> <<default>>
+XPageNumberOnFirstPage false
+XDuplexHeader false
+XHeaderSize <inital_value_of_Size>-2 (header text's size)
+XHeaderFontName Times-Roman
+XHeaderLeftMargin 72
+XHeaderLineWidth 6.5 inch
+XHeaderYPos 10.5 inch
+XFooterYPos 0.5 inch
+X.- /L f
+X.SectPop
+SHAR_EOF
+len=`wc -c < pstext.pst`
+if test $len != 7647 ; then
+echo shar: pstext.pst was $len bytes long, should have been 7647
+fi
+fi # end of overwriting check
+
+if test -f pstext.ps ; then
+echo shar: will not over-write existing file pstext.ps
+else
+echo shar: extracting pstext.ps, 13048 characters
+sed 's/^X//' > pstext.ps <<'SHAR_EOF'
+X%%ProcSet pstext.ps
+X%
+X% Copyright (C) 1991, Geoffrey H. Cooper.
+X% Permission is granted to copy and modify this file on a
+X% non-commercial basis only, providing this copyright notice
+X% is preserved. All rights reserved.
+X%
+X% $Log: pstext.ps,v $
+X% Revision 1.4 92/10/29 14:30:35 geof
+X% Added copyright notice.
+X%
+X% Revision 1.3 90/01/23 14:35:26 geof
+X% Fixed archaic names of "Lucida" and "LucidaSans" roman faces.
+X%
+X% Revision 1.2 90/01/18 18:25:35 geof
+X% Added code to eliminate "print" output and to print an error page.
+X% This is useful for internal use at aurora, since the printer dies
+X% when it generates an error and the message is not displayed.
+X%
+X% Revision 1.1 90/01/18 18:21:39 geof
+X% Initial revision
+X%
+X%
+X
+X% %%%%%%%
+X/print {pop} def
+X/__ws { gsave dup stringwidth pop dup
+X 0 -2 rmoveto 0 rlineto 0 12 rlineto neg 0 rlineto
+X 1 setgray fill
+X grestore show } bind def
+X/__f /Courier findfont 10 scalefont def
+Xerrordict /handleerror {
+X //$error begin
+X newerror {
+X //__f setfont
+X 72 720 moveto
+X gsave (Error: ) __ws errorname =string cvs __ws grestore 0 -12 rmoveto
+X gsave (OffendingCommand: ) __ws //$error /command get =string cvs __ws grestore 0 -12 moveto
+X% gsave (Count: ) __ws ostack length =string cvs __ws grestore 0 -12 rmoveto
+X showpage
+X /newerror false store
+X } if
+X end
+X} bind put
+X% %%%%%%%
+X
+X
+X/inch { 72 mul } def
+X
+X/Size 10 def % size of text
+X/Leading 12 def % space between lines
+X/Justify true def % justify/fill
+X/SpaceMax 10 def % maximum space before letterset comes into play
+X/TopMargin 10 inch Leading sub def % top margin
+X/BottomMargin 72 def % bottom margin
+X/LeftMargin 72 def % left margin
+X/LineWidth 6.5 inch def % width of line for justification, fill
+X/buf 2048 string def % buffer
+X/LineBuf buf def % fragment of line up to now.
+X/I 0 def % index into LineBuf
+X/lw 0 def % current line width
+X/ns 0 def % number of spaces in the current line.
+X/nc 0 def % number of characters in the current line.
+X/ts 0 def % trailing spaces, for lazy evaluation.
+X/SpaceWidth 0 def % width of space in the current font
+X/PageNum 1 def % number of the current page.
+XLeftMargin TopMargin moveto
+X
+X% define font suites
+X/fontfamilies 20 dict def
+Xfontfamilies begin
+X /Times [/Times-Roman /Times-Italic /Times-Bold /Times-BoldItalic] def
+X /Helvetica [/Helvetica /Helvetica-Oblique /Helvetica-Bold /Helvetica-BoldOblique] def
+X /Courier [/Courier /Courier-Oblique /Courier-Bold /Courier-BoldOblique] def
+X /Palatino [/Palatino-Roman /Palatino-Italic /Palatino-Bold /Palatino-BoldItalic] def
+X /Lucida [/Lucida /Lucida-Italic /Lucida-Bold /Lucida-BoldItalic] def
+X /LucidaSans [/LucidaSans /LucidaSans-Italic /LucidaSans-Bold /LucidaSans-BoldItalic] def
+X /LucidaSansTypewriter [/LucidaSans-Typewriter /LucidaSans-Typewriter-Italic /LucidaSans-Typewriter-Bold /LucidaSans-Typewriter-BoldItalic] def
+X /LucidaMono /LucidaSansTypewriter load def
+X /NewCenturySchlbk [/NewCenturySchlbk-Roman /NewCenturySchlbk-Italic /NewCenturySchlbk-Bold /NewCenturySchlbk-BoldItalic] def
+X /NewCenturySchoolbook /NewCenturySchlbk load def
+X /Century /NewCenturySchlbk load def
+X /AvantGarde [ /AvantGarde-Book /AvantGarde-BookOblique /AvantGarde-Demi /AvantGarde-DemiOblique ] def
+X /LubalinGraph [ /LubalinGraph-Book /LubalinGraph-BookOblique /LubalinGraph-Demi /LubalinGraph-DemiOblique ] def
+X /Bookman [ /Bookman-Light /Bookman-LightItalic /Bookman-Demi /Bookman-DemiItalic ] def
+X /Garamond [ /Garamond-Light /Garamond-LightItalic /Garamond-Bold /Garamond-BoldItalic ] def
+X /Optima [ /Optima /Optima-Oblique /Optima-Bold /Optima-BoldOblique ] def
+X /Symbol [ /Symbol /ZapfChancery-MediumItalic /ZapfDingbats /Times-Italic ] def
+Xend
+X
+X/curfam 8 dict def
+Xcurfam begin
+X /C /Courier def
+X /L /Courier def
+X /R /Courier def
+X /F /Courier def
+X /S /Symbol def
+Xend
+X
+X% bind family
+X/F
+X{
+X dup fontfamilies exch known not { pop /Times } if
+X fontfamilies exch get
+X curfam begin
+X /P /B /I /R 5 4 roll { def } forall
+X /L R def /C R def
+X R
+X end
+X ff
+X}
+Xbind def
+X
+X% set font, takes name, one of /P, /B, /I, /R.
+X/f
+X{
+X dup curfam exch known not { pop /R } if
+X curfam begin
+X load dup C /L exch def /C exch def
+X end
+X ff
+X}
+Xbind def
+X
+X% set font to new font in current size.
+X/ff { AF findfont Size scalefont setfont /SpaceWidth ( ) stringwidth pop def } bind def
+X
+X% newline
+X/NL { currentpoint Leading sub
+X dup BottomMargin lt { pop pop NP }
+X { exch pop LeftMargin exch moveto }
+X ifelse
+X} bind def
+X
+X% quantified newline
+X/QNL { currentpoint 2 index Leading mul sub
+X dup BottomMargin lt { pop pop NP }
+X { exch pop LeftMargin exch moveto }
+X ifelse
+X pop
+X} bind def
+X
+X/HNL { .5 QNL } bind def
+X
+X% newpage
+X/NP { (Page ) print PageNum =print (: ) print vmstatus exch =print (/) print =print pop ( bytes used) = flush
+X showpage /PageNum PageNum 1 add def
+X LeftMargin TopMargin moveto H } bind def
+X
+X% "break"
+X/BK { I 0 gt { AF false J } if /ts 0 def } bind def
+X
+X% one space
+X/S { /ts ts 1 add def } bind def
+X
+X% multiple spaces
+X/Ss { ts add /ts exch def } bind def
+X
+X% add word to current line. Doesn't assume space before.
+X% adds in trailing spaces accumulated with "S" and "Ss"
+X/W {
+X /s exch def
+X /tsw ts SpaceWidth mul def % trailing space width.
+X
+X % process input string.
+X s stringwidth pop tsw add /ww exch def
+X ww lw add LineWidth ge { AF Justify J /ts 0 def /ww ww tsw sub def } if
+X
+X I 1 I ts add dup /I exch def 1 sub { LineBuf exch 32 put } for
+X LineBuf I s putinterval
+X /ns ts ns add def
+X /I s length dup nc add ts add /nc exch def
+X I add def
+X /lw lw ww add def
+X /ts 0 def
+X} bind def
+X
+X%
+X% Data structure for justification of multiple fonts
+X%
+X% each array element contains [string font] pair.
+X%
+X/frags 512 array def % array of fragment arrays
+X/fragI 0 def % index to top of array.
+X0 1 frags length 1 sub { frags exch 2 array put } for
+X
+X% Add fragment to line in current font. Assumes "LineBuf" and "I"
+X/AF
+X{
+X I 0 gt
+X {
+X LineBuf 0 I getinterval currentfont frags fragI get astore pop
+X /fragI fragI 1 add def
+X /LineBuf LineBuf I LineBuf length I sub getinterval def
+X /I 0 def
+X }
+X if
+X}
+Xbind def
+X
+X% justify line based on current fragment list
+X% Takes flag about whether to justify or not.
+X/J
+X{
+X /_cf currentfont def
+X {
+X LineWidth lw sub /x exch def
+X /xs x ns div def
+X /xc 0 def
+X xs SpaceMax gt
+X {
+X /xs SpaceMax def
+X /xc x SpaceMax ns mul sub nc div def
+X }
+X if
+X frags 0 fragI getinterval
+X {
+X xs 0 32 xc 0 6 5 roll aload pop setfont awidthshow
+X }
+X forall
+X }
+X {
+X frags 0 fragI getinterval
+X {
+X aload pop setfont show
+X }
+X forall
+X }
+X ifelse
+X /ns 0 def
+X /nc 0 def
+X /lw 0 def
+X /fragI 0 def
+X /LineBuf buf def
+X _cf setfont
+X NL
+X}
+Xbind def
+X
+X% home to left margin
+X/LMHome
+X{
+X currentpoint exch pop LeftMargin exch moveto
+X}
+Xdef
+X
+X/Tab
+X{
+X /_t exch def
+X currentpoint exch LeftMargin sub _t div ceiling _t mul LeftMargin add exch moveto
+X}
+Xdef
+X
+X% Indent "arg" points
+X/Indents 20 array def
+X/IndentsI -1 def
+X
+X/Indent
+X{
+X /i exch def
+X /LeftMargin i LeftMargin add def
+X /LineWidth LineWidth i sub def
+X LMHome
+X IndentsI 19 lt
+X {
+X /IndentsI IndentsI 1 add def
+X Indents IndentsI i put
+X }
+X if
+X}
+Xbind def
+X
+X/Undent
+X{
+X IndentsI 0 ge
+X {
+X /i Indents IndentsI get def
+X /LeftMargin LeftMargin i sub def
+X /LineWidth LineWidth i add def
+X LMHome
+X /IndentsI IndentsI 1 sub def
+X }
+X if
+X}
+Xbind def
+X
+X/LastIndent
+X{
+X IndentsI 0 ge
+X {
+X Indents IndentsI get
+X }
+X { 0 }
+X ifelse
+X}
+Xbind def
+X
+X% Index both right and left margins "arg" points
+X/Squeeze
+X{
+X /i exch def
+X /LeftMargin i LeftMargin add def
+X /LineWidth LineWidth i 2 mul sub def
+X LMHome
+X IndentsI 19 lt
+X {
+X /IndentsI IndentsI 1 add def
+X Indents IndentsI i put
+X }
+X if
+X}
+Xdef
+X
+X/Unsqueeze
+X{
+X IndentsI 0 ge
+X {
+X /i Indents IndentsI get def
+X /LeftMargin LeftMargin i sub def
+X /LineWidth LineWidth i 2 mul add def
+X LMHome
+X /IndentsI IndentsI 1 sub def
+X }
+X if
+X}
+Xdef
+X
+X% set font size to "arg", set leading appropriately
+X/FontSize
+X{
+X dup Size gt
+X {
+X dup Size sub neg 0 exch rmoveto
+X }
+X if
+X /Size exch def
+X /Leading Size 1.2 mul def
+X currentfont /FontName get ff
+X}
+Xdef
+X
+X% Center argument, which must be a string.
+X/Center
+X{
+X dup stringwidth pop LineWidth exch sub 2 div 0 rmoveto show
+X NL
+X}
+Xdef
+X
+X% Paragraph Indent
+X/PIndent
+X{
+X 0 rmoveto
+X}
+Xdef
+X
+X%
+X% Enumerated Items
+X%
+X
+X% Begin enumeration:
+X/EnumCnt [] def
+X
+X/BeginEnum
+X{
+X /EnumCnt EnumCnt aload 0 exch length 1 add array astore def
+X .25 inch Indent
+X}
+Xbind def
+X
+X% Enumerated Item
+X/Enum
+X{
+X EnumCnt dup length 1 sub 2 copy get 1 add put
+X -.25 inch 0 rmoveto
+X
+X EnumCnt dup length 1 sub get
+X EnumCnt length 1 and 1 eq
+X {
+X =string cvs
+X }
+X {
+X 8#140 add =string 0 3 2 roll put =string 0 1 getinterval
+X }
+X ifelse
+X show (.) show
+X
+X currentpoint exch
+X LeftMargin gt { pop ( ) show } { LeftMargin exch moveto } ifelse
+X}
+Xbind def
+X
+X% pop a level
+X/EndEnum
+X{
+X EnumCnt length 0 gt
+X {
+X /EnumCnt EnumCnt 0 EnumCnt length 1 sub getinterval def
+X Undent
+X }
+X if
+X}
+Xbind def
+X
+X% "bullet" item
+X/Item
+X{
+X currentpoint
+X LastIndent neg 0 rmoveto (\267) show
+X moveto
+X}
+Xbind def
+X
+X% "named" item - show "arg"
+X/Descr
+X{
+X LastIndent neg 0 rmoveto
+X show
+X currentpoint exch
+X LeftMargin gt { pop NL } { LeftMargin exch moveto } ifelse
+X}
+Xbind def
+X
+X%
+X% Numbers sections
+X%
+X/SectCnt [0] def
+X
+X% Push section level
+X/SectPush
+X{
+X /SectCnt SectCnt aload 0 exch length 1 add array astore def
+X}
+Xbind def
+X
+X% Pop section level
+X/SectPop
+X{
+X SectCnt length 0 gt
+X {
+X /SectCnt SectCnt 0 SectCnt length 1 sub getinterval def
+X }
+X if
+X}
+Xbind def
+X
+X% New Section, argument is title
+X/Sect
+X{
+X SectCnt dup length 1 sub 2 copy get 1 add put
+X /B f
+X SectCnt { =string cvs show (.) show } forall
+X ( ) show show
+X /L f
+X 1.5 QNL
+X}
+Xbind def
+X
+X% Header procedure.
+X/HeaderLeft () def
+X/HeaderRight () def
+X/HeaderCenter (\320 ~ \320) def
+X/FooterLeft () def
+X/FooterRight () def
+X/FooterCenter () def
+X/PageNumberOnFirstPage false def
+X/DuplexHeader false def
+X/doHbuf 256 string def
+X/HeaderSize Size 2 sub def
+X/HeaderFontName /Times-Roman def
+X/HeaderLeftMargin 72 def
+X/HeaderLineWidth 6.5 inch def
+X/HeaderYPos 10.5 inch def
+X/FooterYPos 0.5 inch def
+X
+X%
+X% Take a string and return either the string or a string which replaces
+X% the first ~ character with the current page number. Note that the
+X% string returned in this case is a static value (use it before the next
+X% call to doPageNum).
+X%
+X/doPageNum
+X{
+X (~) search
+X {
+X PageNum 1 gt
+X PageNumberOnFirstPage or
+X {
+X dup length /_i exch def
+X doHbuf 0 3 2 roll putinterval
+X pop
+X doHbuf _i 10 getinterval PageNum exch cvs length _i add /_i exch def
+X dup length /_l exch def
+X doHbuf _i 3 2 roll putinterval
+X doHbuf 0 _l _i add getinterval
+X }
+X {
+X pop pop pop ()
+X }
+X ifelse
+X }
+X if
+X}
+Xbind def
+X
+X%
+X% usage: LeftString CenterString RightString LineWidth LeftMargin Y HeaderLine -
+X% function: Prints left, center, right strings in current font, doing page
+X% number insertion in place of '~' character.
+X%
+X/HeaderLine
+X{
+X moveto
+X 3 index doPageNum
+X gsave show grestore
+X 2 index doPageNum
+X gsave
+X dup stringwidth pop 2 index exch sub 2 div 0 rlineto show
+X grestore
+X 0 rmoveto
+X doPageNum dup stringwidth neg exch neg exch rmoveto show
+X pop pop
+X}
+Xbind def
+X
+X
+X/H
+X{
+X HeaderRight length 0 eq
+X {
+X /TimeStamp where
+X {
+X pop
+X /HeaderRight TimeStamp def
+X }
+X if
+X }
+X if
+X
+X DuplexHeader
+X PageNum 1 and 0 eq and
+X {
+X gsave
+X HeaderFontName findfont HeaderSize scalefont setfont
+X HeaderRight HeaderCenter HeaderLeft HeaderLineWidth HeaderLeftMargin HeaderYPos HeaderLine
+X FooterRight FooterCenter FooterLeft HeaderLineWidth HeaderLeftMargin FooterYPos HeaderLine
+X grestore
+X }
+X {
+X gsave
+X HeaderFontName findfont HeaderSize scalefont setfont
+X HeaderLeft HeaderCenter HeaderRight HeaderLineWidth HeaderLeftMargin HeaderYPos HeaderLine
+X FooterLeft FooterCenter FooterRight HeaderLineWidth HeaderLeftMargin FooterYPos HeaderLine
+X grestore
+X }
+X ifelse
+X}
+Xbind def
+X
+X% initialize page save/restore
+X/Times F
+X%%EndProcSet
+SHAR_EOF
+len=`wc -c < pstext.ps`
+if test $len != 13048 ; then
+echo shar: pstext.ps was $len bytes long, should have been 13048
+fi
+fi # end of overwriting check
+
+exit 0
+# End of shell archive

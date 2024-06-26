@@ -1,0 +1,382 @@
+#! /bin/sh
+# This is a shell archive. Remove anything before this line, then unpack
+# it by saving it into a file and typing "sh file". To overwrite existing
+# files, type "sh file -c". You can also feed this as standard input via
+# unshar, or by typing "sh <file", e.g.. If this archive is complete, you
+# will see the following message at the end:
+# "End of shell archive."
+# Contents: README lpsim.ps lpsim.shift.ps test_backspace
+# Wrapped by anthony@dragon on Thu Apr 22 17:04:46 1993
+PATH=/bin:/usr/bin:/usr/ucb ; export PATH
+if test -f 'README' -a "${1}" != "-c" ; then
+echo shar: Will not clobber existing file \"'README'\"
+else
+echo shar: Extracting \"'README'\" \(2035 characters\)
+sed "s/^X//" >'README' <<'END_OF_FILE'
+X
+Xlpsim -- line printer simulator -- a postscript text processor
+X
+X Printing text in postscript normally involves filtering the text through
+Xa C program to convert it to postscript. The postscript programs in this
+Xdirectory work in a different way. Instead of filtering the text the text
+Xhas a postscript line printer simulator prepended to the beginning of it.
+X
+X These poscript line printer simulators were developed from a simular
+Xscript by Bruce Fowler (b...@mrspock.att.com). This script while allowing
+Xthe use of backspaces to do overstriking (which is suitable for underlines
+Xto be printed) did not do so such that overstrike bolding can be achieved
+X(IE: overstiking a character with itself so it appears darker).
+X
+X Many C text to postscript converters also do not do overstrike bolding
+Xcorrectly, but can do overstrike underlining. To name a couple of these
+Xare the well known (and widely used) programs ``enscript'' and ``pstext''.
+X
+X The problem was that when postscript draws two characters on top of each
+Xother (as in backspace overstrike) it does so exactly, so no differance
+Xcan be seen. The scripts presented here solve this problem in two ways as
+Xfollows.
+X
+X lpsim.shift.ps Just displace the backspacing by a small increment
+X Thus overstriked characters become visible
+X (This works but does not bold very well)
+X
+X lpsim.ps Check is it is an overstrike and if so substitute
+X a bold font for this character.
+X
+X The last method is the best of the two but requires a lot of testing of
+Xstrings. It could probably be improved enormously by saving consective
+Xbold characters and printing them all together.
+X
+X I do not like the overall method used for the line printer. The use of
+X``search'' for dividing strings is clumbsy. A better idea would be to use
+Xthe postscript ``cshow'' function to check characters as they are printed,
+Xor collected into print strings.
+X
+X Anthony Thyssen -- ant...@dragon.cit.gu.edu.au
+X
+END_OF_FILE
+if test 2035 -ne `wc -c <'README'`; then
+echo shar: \"'README'\" unpacked with wrong size!
+fi
+# end of 'README'
+fi
+if test -f 'lpsim.ps' -a "${1}" != "-c" ; then
+echo shar: Will not clobber existing file \"'lpsim.ps'\"
+else
+echo shar: Extracting \"'lpsim.ps'\" \(5532 characters\)
+sed "s/^X//" >'lpsim.ps' <<'END_OF_FILE'
+X%!PS
+X%%Title:Line Printer Simulator, version 3 (4/93)
+X%%Creator:Anthony Thyssen (ant...@dragon.cit.gu.edu.au)
+X%%EndComments
+X%
+X% Postscript line printer simulator. Cat this onto front of file to be
+X% printed.
+X% Tabs replaced with blanks to next tabstop (every /tabsiz spaces).
+X% Backspaces cause overprinting and if it is the same character, bold
+X% Line with only ^L causes form feed.
+X% Leaves margins, for punching holes. For 8-1/2 x 11 paper.
+X% Choice of different page layouts.
+X% portrait: 66 lines by 80 columns -- 12 point type spaced 11 point
+X% landscape: 66 lines by 132 columns -- 9 point type spaced 8 point
+X% small: 90 lines by 100 columns -- 9 point type spaced 8 point
+X%
+X32 dict begin % Set up some local storage
+X/portrait 0 def
+X/landscape 1 def
+X/small 2 def
+X
+X/style portrait def % which style are we to use
+X
+X% --- Portrait Style ---
+Xstyle portrait eq {
+X /toppg 759 def % Top of page
+X /botpg 33 def % Last line goes here
+X /lmargin 54 def % Left margin (0.75")
+X /fontsize 12 def % font size to use
+X /lineinc -11 def % Step to next line
+X} if
+X
+X% --- Landscape Style ---
+Xstyle landscape eq {
+X /toppg 556 def % Top of page
+X /botpg 33 def % Last line goes here
+X /lmargin 36 def % Left margin (0.5")
+X /fontsize 9 def % font size to use
+X /lineinc -8 def % Step to next line
+X [ 0 1 -1 0 612 0 ] concat % rotate for landscape
+X} if
+X
+X% --- Landscape Style ---
+Xstyle small eq {
+X /toppg 756 def % Top of page
+X /botpg 36 def % Last line goes here
+X /lmargin 36 def % Left margin (0.5")
+X /fontsize 9 def % font size to use
+X /lineinc -8 def % Step to next line
+X} if
+X
+X/tabsiz 8 def % Number of spaces per tab stop
+X/curline 512 string def % Storage for current line
+X
+X/normfont /Courier findfont fontsize scalefont def
+X/boldfont /Courier-Bold findfont fontsize scalefont def
+X
+Xnormfont setfont % set the normal font
+X/blankwd ( ) stringwidth pop def % Width of blank
+X/tabwd blankwd tabsiz mul def % Width of tab stop
+X/infile (%stdin) (r) file def % Source of input to print
+X
+X% --- Special Characters ---
+X
+X% This proc looks for backspaces and check if bolding is required
+X/dobackspace { % syntax: post pre dobackspace post
+X dup dup length 1 sub 1 getinterval % extract the last char of pre string
+X dup 0 get 3 index 0 get eq { % compare to first char of post string
+X % bold repeated character
+X exch dup length 1 sub dup 0 gt { % if more than one char
+X 0 exch getinterval dostring % then print string upto bold char
+X }{ pop pop } ifelse % else just pop length & single char
+X boldfont setfont dostring normfont setfont % do bold character
+X dup length 1 sub dup 0 gt { % if more than one char left
+X 1 exch getinterval % then remove first char
+X }{ pop } ifelse % else pop length
+X }{ % overwrite two different characters
+X pop dostring % remove test and print pre string
+X blankwd neg 0 rmoveto % negitive space
+X currentpoint exch lmargin lt { % if backed of the left margin
+X lmargin exch moveto % then just stop at left margin
+X }{ pop } ifelse % else just pop the length
+X } ifelse
+X} bind def
+X
+X/dotab { %def % Move right to next tab stop
+X currentpoint pop lmargin sub % Current horizontal position
+X dup blankwd 2 div add tabwd div
+X floor 1 add % Which tab stop is next
+X tabwd mul exch sub 0 rmoveto % Position there
+X} bind def
+X
+X/doformfeed { %def % formfeed
+X currentpoint exch pop % which line are we on
+X toppg ne { % don't print blank pages
+X gsave showpage grestore % any rotation -- keep
+X lmargin toppg moveto % Position to top of page
+X } if
+X} bind def
+X
+X/doreturn { %def
+X doret { % are we supose to do a return or not?
+X currentpoint exch pop lineinc add % Y = Y + increment
+X dup lmargin exch moveto % save y, move to left margin
+X botpg le { doformfeed } if % next page if off the bottom
+X } if
+X} bind def
+X
+X/dostring { %def % Print the string line given (no return)
+X dup length 0 ne { % just return if string is empty
+X { (\014) search { % formfeeds
+X exch pop dostring doformfeed % do pre-string and formfeed
+X /doret false def % don't return if nothing else is on line
+X }{
+X (\t) search {
+X exch pop dostring dotab % do pre-string and tab
+X }{
+X (\b) search {
+X exch pop dobackspace % do backspace (with bioth pre and post)
+X }{
+X /doret true def % return is now valid at end of code
+X show exit % show the string and quit loop
+X } ifelse % backspace
+X } ifelse % tabs
+X } ifelse % formfeeds
+X } loop
+X } if
+X} bind def
+X
+X/doprint { %def % File printing proc
+X lmargin toppg moveto % Position to top of page
+X { infile curline readline { % Read to end of file
+X /doret true def % do return unless otherwise
+X dostring % output the read in string
+X doreturn % return to the next line position
+X }{ exit } ifelse % Exit loop after last line read
+X } loop
+X doformfeed
+X end % Pop local dict and quit
+X} bind def
+X
+X% --- DO IT ---
+Xdoprint
+END_OF_FILE
+if test 5532 -ne `wc -c <'lpsim.ps'`; then
+echo shar: \"'lpsim.ps'\" unpacked with wrong size!
+fi
+# end of 'lpsim.ps'
+fi
+if test -f 'lpsim.shift.ps' -a "${1}" != "-c" ; then
+echo shar: Will not clobber existing file \"'lpsim.shift.ps'\"
+else
+echo shar: Extracting \"'lpsim.shift.ps'\" \(4849 characters\)
+sed "s/^X//" >'lpsim.shift.ps' <<'END_OF_FILE'
+X%!PS
+X%%Title:Line Printer Simulator, version 3 (4/93)
+X%%Creator:Anthony Thyssen (ant...@dragon.cit.gu.edu.au)
+X%%BoundingBox:0 0 612 792
+X%%Pages:?
+X%%EndComments
+X%
+X% Postscript line printer simulator. Cat this onto front of file to be
+X% printed.
+X% Tabs replaced with blanks to next tabstop (every /tabsiz spaces).
+X% Backspaces cause overprinting and if it is the same character, bold
+X% Line with only ^L causes form feed.
+X% Leaves margins, for punching holes. For 8-1/2 x 11 paper.
+X% Choice of different page layouts.
+X% portrait: 66 lines by 80 columns -- 12 point type spaced 11 point
+X% landscape: 66 lines by 132 columns -- 9 point type spaced 8 point
+X% small: 90 lines by 100 columns -- 9 point type spaced 8 point
+X%
+X32 dict begin % Set up some local storage
+X/portrait 0 def
+X/landscape 1 def
+X/small 2 def
+X
+X/style portrait def % which style are we to use
+X
+X% --- Portrait Style ---
+Xstyle portrait eq {
+X /toppg 759 def % Top of page
+X /botpg 33 def % Last line goes here
+X /lmargin 54 def % Left margin (0.75")
+X /fontsize 12 def % font size to use
+X /lineinc -11 def % Step to next line
+X} if
+X
+X% --- Landscape Style ---
+Xstyle landscape eq {
+X /toppg 556 def % Top of page
+X /botpg 33 def % Last line goes here
+X /lmargin 36 def % Left margin (0.5")
+X /fontsize 9 def % font size to use
+X /lineinc -8 def % Step to next line
+X [ 0 1 -1 0 612 0 ] concat % rotate for landscape
+X} if
+X
+X% --- Landscape Style ---
+Xstyle small eq {
+X /toppg 756 def % Top of page
+X /botpg 36 def % Last line goes here
+X /lmargin 36 def % Left margin (0.5")
+X /fontsize 9 def % font size to use
+X /lineinc -8 def % Step to next line
+X} if
+X
+X/tabsiz 8 def % Number of spaces per tab stop
+X/boldinc .8 def % bold increment (using same font)
+X/curline 512 string def % Storage for current line
+X
+X/Courier findfont fontsize scalefont setfont % font to print in
+X/blankwd ( ) stringwidth pop def % Width of blank
+X/tabwd blankwd tabsiz mul def % Width of tab stop
+X/infile (%stdin) (r) file def % Source of input to print
+X
+X% --- Special Characters ---
+X
+X/dobackspace { % syntax: post dobackspace post
+X boldinc blankwd sub 0 rmoveto % negitive space
+X currentpoint exch lmargin lt { % Don't go off the left margin
+X lmargin exch moveto
+X }{ pop } ifelse
+X 1 copy dup 0 1 getinterval % extract the first character of the post
+X dostring % do bold char displaced
+X boldinc neg 0 rmoveto % return to normal position
+X dup length 1 sub 1 exch getinterval % remove first char
+X} bind def
+X
+X/dotab { %def % Move right to next tab stop
+X currentpoint pop lmargin sub % Current horizontal position
+X dup blankwd 2 div add tabwd div
+X floor 1 add % Which tab stop is next
+X tabwd mul exch sub 0 rmoveto % Position there
+X} bind def
+X
+X/doformfeed { %def % formfeed
+X currentpoint exch pop % which line are we on
+X toppg ne { % don't print blank pages
+X gsave showpage grestore % any rotation -- keep
+X lmargin toppg moveto % Position to top of page
+X } if
+X} bind def
+X
+X/doreturn { %def
+X doret { % are we supose to do a return or not?
+X currentpoint exch pop lineinc add % Y = Y + increment
+X dup lmargin exch moveto % save y, move to left margin
+X botpg le { doformfeed } if % next page if off the bottom
+X } if
+X} bind def
+X
+X/dostring { %def % Print the string line given (no return)
+X dup length 0 ne { % just return if string is empty
+X { (\014) search { % formfeeds
+X exch pop dostring
+X doformfeed % do pre-string and formfeed
+X /doret false def % don't return if nothing else is on line
+X }{
+X (\t) search {
+X exch pop dostring
+X dotab % do pre-string and tab
+X }{
+X (\b) search {
+X exch pop dostring
+X dobackspace % do backspace
+X }{
+X /doret true def % return is now valid at end of code
+X show exit % show the string and quit loop
+X } ifelse % backspace
+X } ifelse % tabs
+X } ifelse % formfeeds
+X } loop
+X } if
+X} bind def
+X
+X/doprint { %def % File printing proc
+X lmargin toppg moveto % Position to top of page
+X { infile curline readline { % Read to end of file
+X /doret true def % do return unless otherwise
+X dostring % output the read in string
+X doreturn % return to the next line position
+X }{ exit } ifelse % Exit loop after last line read
+X } loop
+X doformfeed
+X end % Pop local dict and quit
+X} bind def
+X
+X% --- DO IT ---
+Xdoprint
+END_OF_FILE
+if test 4849 -ne `wc -c <'lpsim.shift.ps'`; then
+echo shar: \"'lpsim.shift.ps'\" unpacked with wrong size!
+fi
+# end of 'lpsim.shift.ps'
+fi
+if test -f 'test_backspace' -a "${1}" != "-c" ; then
+echo shar: Will not clobber existing file \"'test_backspace'\"
+else
+echo shar: Extracting \"'test_backspace'\" \(129 characters\)
+sed "s/^X//" >'test_backspace' <<'END_OF_FILE'
+Xprev a ab b_ cd de e post
+X | backspace | plain
+X | b ba ac ck ks sp pa ac ce e | bold
+X | _ b_ a_ c_ k_ s_ p_ a_ c_ e | underline
+X
+END_OF_FILE
+echo shar: 23 control characters may be missing from \"'test_backspace'\"
+if test 129 -ne `wc -c <'test_backspace'`; then
+echo shar: \"'test_backspace'\" unpacked with wrong size!
+fi
+# end of 'test_backspace'
+fi
+echo shar: End of shell archive.
+exit 0

@@ -1,0 +1,193 @@
+%!PS
+%%Title: Postscript Line Printer Simulator, version 4 (3/94)
+%%FileName: lps.ps (originally called lpsim.ps)
+%%Creator: Anthony Thyssen (ant...@dragon.cit.gu.edu.au), version 3 (4/93)
+%%Modified: Tony Nugent (T.Nu...@sct.gu.edu.au) for version 4
+%% (added "custom" and "tiny" styles and some other minor changes)
+%%Purpose: To send an ordinary ASCII text file to a postscript printer.
+%%Use: Concatenate this onto beginning of ASCII file to be printed.
+%%EndComments
+%
+% Notes:
+% Tabs replaced with blanks to next tabstop (every /tabsiz spaces).
+% Backspaces cause overprinting and if it is the same character, bold
+% Line with only ^L causes form feed.
+% ^D or ^[ at end of file (should) reset printer/signal "end of job"
+% Choice of different page layouts:
+% custom: see below
+% portrait: 66 lines by 80 columns -- 12 point type spaced 11 point
+% landscape: 66 lines by 132 columns -- 9 point type spaced 8 point
+% small: 90 lines by 100 columns -- 9 point type spaced 8 point
+% tiny: approx 150 lines by 156 columns -- 6 point type spaced 5 point
+%
+% ( With the portrait, landscape and small layouts,
+% leaves margins for punching holes [8-1/2 x 11 paper])
+%
+% This program should deal with the whole line before it shows anything
+% but instead prints the line in segments seperated by the special characters
+
+% Set up some local storage
+32 dict begin
+/custom 0 def
+/portrait 1 def
+/landscape 2 def
+/small 3 def
+/tiny 4 def
+
+%%%%%%%%%%%%%%%%%%%%% USER DEFINITIONS %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%
+% This section is the only one that needs modification for normal use
+%
+% style to use: UNCOMMENT ONE OF THESE LINES
+% /style custom def % custom parameters set just below
+/style portrait def % 66 lines x 80 columns, 12pt font, 11pt line spacing
+% /style landscape def % 66 lines x 132 columns, 9pt font, 8pt line spacing
+% /style small def % 90 lines x 100 columns, 9pt font, 8pt line spacing
+% /style tiny def % 150 lines x 156 columns, 6pt font, 5pt line spacing
+%
+% --- Custom Style ---
+% Notes:
+% There are 72 points/inch, or 28.3pt/cm (1"=2.54cm, 1cm=0.3937")
+% 1pt = 1/72" = 0.01389" = 0.03528cm
+% Top and bottom margins are measured from the bottom of the page!
+% A4 paper: 11.65" x 8.27", 29.6cm x 21.0cm, 838.8pt x 595.44pt
+% letter: 11" x 8", 27.94cm x 20.32cm, 792pt x 576pt
+%
+style custom eq { % user-defined style (example)
+/toppg 800 def % Top of page
+/botpg 20 def % Last line
+/lmargin 20 def % Left margin
+/fontsize 10 def % font size to use
+/lineinc -9 def % line spacing
+% [ 0 1 -1 0 612 0 ] concat % rotate for landscape
+} if
+%
+%%%%%%%%%%%%%%%%%%%%% END USER DEFINITIONS %%%%%%%%%%%%%%%%%%%%%%%%%%
+
+% --- Portrait Style ---
+style portrait eq {
+/toppg 780 def % Top of page (Originally set at 759)
+/botpg 28 def % Last line goes here
+/lmargin 36 def % Left margin (0.5"; originally 54pt=0.75")
+/fontsize 12 def % font size
+/lineinc -11 def % line spacing
+} if
+
+% --- Landscape Style ---
+style landscape eq {
+/toppg 556 def % Top of page
+/botpg 33 def % Last line
+/lmargin 36 def % Left margin (0.5")
+/fontsize 9 def % font size
+/lineinc -8 def % line spacing
+[ 0 1 -1 0 612 0 ] concat % rotate for landscape
+} if
+
+% --- Small Style ---
+style small eq {
+/toppg 756 def % Top of page
+/botpg 36 def % Last line
+/lmargin 36 def % Left margin (0.5")
+/fontsize 9 def % font size
+/lineinc -8 def % line spacing
+} if
+
+% --- Tiny Style ---
+style tiny eq {
+/toppg 800 def % Top of page: 1.37cm
+/botpg 18 def % Last line: 0.635cm (0.25")
+/lmargin 14 def % Left margin: 0.5cm
+/fontsize 6 def % font size: 6pt
+/lineinc -5 def % line spacing
+} if
+
+/tabsiz 8 def % Number of spaces per tab stop
+% /curline 512 string def % Storage for current line
+/curline 768 string def % Storage for current line
+
+/normfont /Courier findfont fontsize scalefont def
+/boldfont /Courier-Bold findfont fontsize scalefont def
+
+normfont setfont % set the normal font
+/blankwd ( ) stringwidth pop def % Width of blank
+/tabwd blankwd tabsiz mul def % Width of tab stop
+
+%/infile (%stdin) (r) file def % Source of input to print
+/infile currentfile def % Source of input to print
+
+% --- Special Characters ---
+
+/dorevspace {
+blankwd neg 0 rmoveto % negative space
+currentpoint exch lmargin lt { % if backed over the left margin
+lmargin exch moveto % then just stop at left margin
+}{ pop } ifelse % else just pop the length
+} bind def
+
+% this proc looks to see if bolding is required
+/dobackspace { % syntax: post pre dobackspace post
+dup length 0 eq 2 index length 0 eq or { % is either string empty
+dostring dorevspace % just do a plain backspace
+}{
+dup dup length 1 sub 1 getinterval % get last char of pre
+dup 3 index 0 1 getinterval ne { % test for overstrike bold
+pop dostring dorevspace % just do a plain backspace
+}{
+exch dup length 1 sub 0 exch getinterval dostring % pre string
+boldfont setfont dostring normfont setfont % DO BOLD
+dup length 1 sub 1 exch getinterval % post sring
+}ifelse % not overstrike bold
+} ifelse % one string is null
+} bind def
+
+/dotab { %def % Move right to next tab stop
+currentpoint pop lmargin sub % Current horizontal position
+dup blankwd 2 div add tabwd div
+floor 1 add % Which tab stop is next
+tabwd mul exch sub 0 rmoveto % Position there
+} bind def
+
+/doformfeed { %def % formfeed
+currentpoint exch pop % which line are we on
+toppg ne { % don't print blank pages
+gsave showpage grestore % any rotation -- keep
+lmargin toppg moveto % Position to top of page
+} if
+} bind def
+
+/doreturn { %def
+doret { % are we supose to do a return or not?
+currentpoint exch pop lineinc add % Y = Y + increment
+dup lmargin exch moveto % save y, move to left margin
+botpg le { doformfeed } if % next page if off the bottom
+} if
+} bind def
+
+/dostring { %def % Print line given (no return)
+dup length 0 eq { pop }{ % pop and return if string is empty
+{ (\014) search { % formfeeds
+exch pop dostring doformfeed % do pre-string and formfeed
+/doret false def % don't return if nothing else on line
+}{ (\t) search { exch pop dostring dotab } % do pre-string and tab
+{ (\b) search { exch pop dobackspace } % do pre & post backspace
+{ /doret true def % return is now valid at end of code
+show exit % show the string and quit loop
+} ifelse % backspace
+} ifelse % tabs
+} ifelse % formfeeds
+} loop
+} ifelse
+} bind def
+
+/doprint { %def % File printing proc
+lmargin toppg moveto { % Position to top of page
+infile curline readline { % Read to end of file
+/doret true def % do return unless otherwise
+dostring % output the read in string
+doreturn % return to the next line position
+}{ pop exit } ifelse % Exit loop after last line read
+} loop doformfeed end % Pop local dict and quit
+} bind def
+
+% --- DO IT --- (add your ASCII text file below the "doprint" label below )
+doprint
