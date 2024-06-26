@@ -1,0 +1,40 @@
+lpsim -- line printer simulator -- a postscript text processor
+
+Printing text in postscript normally involves filtering the text through
+a C program to convert it to postscript. The postscript programs in this
+directory work in a different way. Instead of filtering the text the text
+has a postscript line printer simulator prepended to the beginning of it.
+
+These poscript line printer simulators were developed from a simular
+script by Bruce Fowler (b...@mrspock.att.com). This script while allowing
+the use of backspaces to do overstriking (which is suitable for underlines
+to be printed) did not do so such that overstrike bolding can be achieved
+(IE: overstiking a character with itself so it appears darker).
+
+Many C text to postscript converters also do not do overstrike bolding
+correctly, but can do overstrike underlining. To name a few of the ascii
+to poscript converters that do this: enscript, pstext, and mp.
+
+The problem was that when postscript draws two characters on top of each
+other (as in backspace overstrike) it does so exactly, so no differance
+can be seen. The scripts presented here attempts to solve this problem
+using two differant methods as follows.
+
+lpsim.shift.ps Just displace the backspacing by a small increment
+Thus overstriked characters become visible
+(This works but does not bold very well)
+
+lpsim.ps Check if it is an overstrike and if so substitute
+a bold font for this character.
+
+The last method is the best of the two but requires a lot of testing of
+strings. It could probably be improved enormously by saving consective
+bold characters into a seperate string and printing them over the
+top of the non-bold characters string.
+
+I do not like the overall method used for the line printer. The use of
+``search'' for dividing strings is clumbsy. A better idea would be to use
+the postscript ``cshow'' function to check characters as they are printed,
+or collected into print strings.
+
+Anthony Thyssen -- ant...@dragon.cit.gu.edu.au
